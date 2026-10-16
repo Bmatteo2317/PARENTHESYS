@@ -27,6 +27,8 @@ function getClient() {
   return client;
 }
 
+type DatabaseRow = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+
 export const db = ((strings: TemplateStringsArray, ...values: unknown[]) => {
-  return getClient()(strings, ...values) as Promise<Record<string, any>[]>;
-}) as (strings: TemplateStringsArray, ...values: unknown[]) => Promise<Record<string, any>[]>;
+  return getClient()(strings, ...values) as Promise<DatabaseRow[]>;
+}) as (strings: TemplateStringsArray, ...values: unknown[]) => Promise<DatabaseRow[]>;

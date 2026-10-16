@@ -240,6 +240,18 @@ a { color: inherit; }
 .task-card.completed .task-title { color: #99949c; text-decoration: line-through; }
 .task-check { width: 19px; height: 19px; display: grid; place-items: center; border: 1px solid #d9d5de; border-radius: 6px; background: #fff; color: #fff; cursor: pointer; }
 .task-card.completed .task-check { border-color: #82a477; background: #82a477; }
+.support-requests-panel { margin-top: 13px; }
+.support-request-form { max-width: 760px; margin: 3px 0 16px; padding: 13px; border: 1px solid #eeeaf3; border-radius: 9px; background: #fcfbfe; }
+.support-empty { display: flex; flex-direction: column; gap: 4px; padding: 14px 2px 3px; color: #89838e; font-size: 9px; line-height: 1.5; }
+.support-empty strong { color: #5c5661; font-size: 10px; }
+.support-request-list { display: grid; gap: 8px; }
+.support-request-card { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px; border: 1px solid #eeeae6; border-radius: 9px; background: #fff; }
+.support-request-copy { min-width: 0; flex: 1; }
+.support-request-title { color: #4b4650; font-size: 10px; font-weight: 700; }
+.support-request-copy > p { margin: 5px 0 0; color: #77717e; font-size: 9px; line-height: 1.5; white-space: pre-wrap; }
+.support-claimed-status { display: inline-block; margin-top: 7px; color: #5f8b69; font-size: 9px; font-weight: 600; }
+.support-request-actions { display: flex; flex: 0 0 auto; gap: 6px; }
+.support-request-actions form { margin: 0; }
 .task-content { min-width: 0; flex: 1; }
 .task-title { color: #4b4650; font-size: 10px; font-weight: 600; }
 .task-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; color: #928d96; font-size: 8px; }
@@ -380,6 +392,8 @@ a { color: inherit; }
   .onboarding-columns > section > p { min-height: 0; }
   .member-row { grid-template-columns: minmax(125px, 1fr) 90px minmax(250px, 1.25fr); }
   .schedule-hours { flex-wrap: wrap; }
+  .support-request-card { align-items: flex-start; flex-direction: column; }
+  .support-request-actions { width: 100%; justify-content: flex-end; }
 }
 @media (max-width: 430px) {
   .toolbar-right { gap: 5px; }

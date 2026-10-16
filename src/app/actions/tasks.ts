@@ -48,3 +48,71 @@ export async function toggleTask(formData: FormData) {
   `;
   revalidatePath("/tasks");
 }
+
+export async function createSupportRequest(formData: FormData) {
+  const context = await getFamilyContext();
+  const title = z.string().trim().min(3).max(120).safeParse(formData.get("title"));
+  const date = z.string().refine(isCalendarDate, "Inserisci una data valida.").safeParse(formData.get("neededBy"));
+  const description = z.string().trim().max(500).optional().safeParse(formData.get("description") || undefined);
+  if (!title.success || !date.success || !description.success) {
+    throw new Error("Controlla titolo, data e dettagli della richiesta.");
+  }
+
+  await db`
+    INSERT INTO "SupportRequest" (
+      "id", "familyGroupId", "createdById", "title", "description", "neededBy", "updatedAt"
+    )
+    VALUES (
+      gen_random_uuid()::text, ${context.familyId}, ${context.userId}, ${title.data},
+      ${description.data || null}, ${date.data}, NOW()
+    )
+  `;
+  revalidatePath("/tasks");
+}
+
+export async function claimSupportRequest(formData: FormData) {
+  const context = await getFamilyContext();
+  const id = z.string().min(1).safeParse(formData.get("id"));
+  if (!id.success) throw new Error("Richiesta di aiuto non valida.");
+
+  const [request] = await db`
+    UPDATE "SupportRequest"
+    SET "status" = 'CLAIMED', "claimedById" = ${context.userId}, "claimedAt" = NOW(), "updatedAt" = NOW()
+    WHERE "id" = ${id.data} AND "familyGroupId" = ${context.familyId}
+      AND "status" = 'OPEN' AND "createdById" <> ${context.userId}
+    RETURNING "id"
+  `;
+  if (!request) throw new Error("La richiesta è stata già presa in carico o non è più disponibile.");
+  revalidatePath("/tasks");
+}
+
+export async function releaseSupportRequest(formData: FormData) {
+  const context = await getFamilyContext();
+  const id = z.string().min(1).safeParse(formData.get("id"));
+  if (!id.success) throw new Error("Richiesta di aiuto non valida.");
+
+  const [request] = await db`
+    UPDATE "SupportRequest"
+    SET "status" = 'OPEN', "claimedById" = NULL, "claimedAt" = NULL, "updatedAt" = NOW()
+    WHERE "id" = ${id.data} AND "familyGroupId" = ${context.familyId}
+      AND "claimedById" = ${context.userId} AND "status" = 'CLAIMED'
+    RETURNING "id"
+  `;
+  if (!request) throw new Error("Non puoi modificare una richiesta presa in carico da un’altra persona.");
+  revalidatePath("/tasks");
+}
+
+export async function cancelSupportRequest(formData: FormData) {
+  const context = await getFamilyContext();
+  const id = z.string().min(1).safeParse(formData.get("id"));
+  if (!id.success) throw new Error("Richiesta di aiuto non valida.");
+
+  const [request] = await db`
+    UPDATE "SupportRequest" SET "status" = 'CANCELLED', "updatedAt" = NOW()
+    WHERE "id" = ${id.data} AND "familyGroupId" = ${context.familyId}
+      AND "createdById" = ${context.userId} AND "status" IN ('OPEN', 'CLAIMED')
+    RETURNING "id"
+  `;
+  if (!request) throw new Error("Puoi ritirare solo una tua richiesta ancora attiva.");
+  revalidatePath("/tasks");
+}
