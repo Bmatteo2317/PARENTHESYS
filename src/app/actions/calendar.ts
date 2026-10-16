@@ -32,7 +32,7 @@ function parseEvent(formData: FormData) {
 async function validateFamilyUsers(familyId: string, userIds: string[]) {
   const ids = [...new Set(userIds.filter(Boolean))];
   if (!ids.length) return;
-  const members = await db`SELECT "userId" FROM "FamilyMember" WHERE "familyGroupId" = ${familyId}`;
+  const members = (await db`SELECT "userId" FROM "FamilyMember" WHERE "familyGroupId" = ${familyId}`) as Array<{ userId: string }>;
   const validIds = new Set(members.map((member) => member.userId));
   if (ids.some((id) => !validIds.has(id))) {
     throw new Error("Un familiare selezionato non appartiene a questo gruppo.");
@@ -40,14 +40,14 @@ async function validateFamilyUsers(familyId: string, userIds: string[]) {
 }
 
 async function memberConflicts(familyId: string, userId: string, start: Date, end: Date, excludeEventId?: string) {
-  const conflicts = await db`
+  const conflicts = (await db`
     SELECT "id" FROM "Event"
     WHERE "familyGroupId" = ${familyId}
       AND (${excludeEventId ?? null}::text IS NULL OR "id" <> ${excludeEventId ?? null})
       AND "startTime" < ${end} AND "endTime" > ${start}
       AND ("assignedUserId" = ${userId} OR "chaperoneUserId" = ${userId} OR "pickupUserId" = ${userId})
     LIMIT 1
-  `;
+  `) as Array<{ id: string }>;
   return conflicts.length > 0;
 }
 
