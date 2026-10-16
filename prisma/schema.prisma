@@ -1,0 +1,185 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id               String          @id @default(cuid())
+  name             String
+  email            String          @unique
+  passwordHash     String?
+  emailVerified    DateTime?
+  image            String?
+  avatarUrl        String?
+  avatarColor      String          @default("#3B82F6")
+  workSchedule     Json?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  accounts         Account[]
+  sessions         Session[]
+  memberships      FamilyMember[]
+  assignedEvents   Event[]         @relation("AssignedUser")
+  chaperoneEvents  Event[]         @relation("ChaperoneUser")
+  pickupEvents     Event[]         @relation("PickupUser")
+  assignedTasks    Task[]          @relation("TaskAssignee")
+  createdTasks     Task[]          @relation("TaskCreator")
+}
+
+model Account {
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
+}
+
+model Session {
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model FamilyGroup {
+  id         String         @id @default(cuid())
+  name       String
+  inviteCode String         @unique
+  timezone   String         @default("Europe/Rome")
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+  members    FamilyMember[]
+  kids       KidProfile[]
+  events     Event[]
+  tasks      Task[]
+}
+
+model FamilyMember {
+  id            String      @id @default(cuid())
+  userId        String
+  familyGroupId String
+  roleName      String
+  permission    Permission  @default(ADMIN)
+  kidProfileId  String?    @unique
+  joinedAt      DateTime    @default(now())
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  familyGroup   FamilyGroup @relation(fields: [familyGroupId], references: [id], onDelete: Cascade)
+  kidProfile    KidProfile? @relation(fields: [kidProfileId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, familyGroupId])
+  @@index([familyGroupId, permission])
+}
+
+model KidProfile {
+  id            String      @id @default(cuid())
+  familyGroupId String
+  name          String
+  birthDate     DateTime?
+  notes         String?
+  avatarColor   String      @default("#EC4899")
+  createdAt     DateTime    @default(now())
+  familyGroup   FamilyGroup @relation(fields: [familyGroupId], references: [id], onDelete: Cascade)
+  events        Event[]
+  tasks         Task[]
+  member        FamilyMember?
+
+  @@index([familyGroupId])
+}
+
+model Event {
+  id              String       @id @default(cuid())
+  familyGroupId   String
+  title           String
+  description     String?
+  location        String?
+  startTime       DateTime
+  endTime         DateTime
+  category        Category     @default(SCHOOL)
+  status          EventStatus  @default(UNASSIGNED)
+  assignedUserId  String?
+  chaperoneUserId String?
+  pickupUserId    String?
+  kidProfileId    String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  familyGroup     FamilyGroup  @relation(fields: [familyGroupId], references: [id], onDelete: Cascade)
+  assignedUser    User?        @relation("AssignedUser", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  chaperoneUser   User?        @relation("ChaperoneUser", fields: [chaperoneUserId], references: [id], onDelete: SetNull)
+  pickupUser      User?        @relation("PickupUser", fields: [pickupUserId], references: [id], onDelete: SetNull)
+  kidProfile      KidProfile?  @relation(fields: [kidProfileId], references: [id], onDelete: SetNull)
+
+  @@index([familyGroupId, startTime])
+  @@index([assignedUserId, startTime, endTime])
+  @@index([kidProfileId, startTime, endTime])
+}
+
+model Task {
+  id            String       @id @default(cuid())
+  familyGroupId String
+  title         String
+  description   String?
+  status        TaskStatus   @default(PENDING)
+  assignedToId  String
+  kidProfileId  String?
+  createdById   String?
+  dueDate       DateTime
+  points        Int          @default(0)
+  completedAt   DateTime?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  familyGroup   FamilyGroup  @relation(fields: [familyGroupId], references: [id], onDelete: Cascade)
+  assignedTo    User         @relation("TaskAssignee", fields: [assignedToId], references: [id], onDelete: Cascade)
+  kidProfile    KidProfile?  @relation(fields: [kidProfileId], references: [id], onDelete: SetNull)
+  createdBy     User?        @relation("TaskCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([familyGroupId, dueDate])
+  @@index([assignedToId, status])
+}
+
+enum Permission {
+  ADMIN
+  HELPER
+  MEMBER
+}
+
+enum Category {
+  WORK
+  SCHOOL
+  SPORT
+  HEALTH
+  HOUSEHOLD
+  LEISURE
+}
+
+enum EventStatus {
+  CONFIRMED
+  UNASSIGNED
+  CONFLICT
+}
+
+enum TaskStatus {
+  PENDING
+  COMPLETED
+  CONFLICT_WARNING
+}
