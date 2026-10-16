@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarDays, CheckSquare2, ChevronRight, HeartHandshake, Menu, UsersRound } from "lucide-react";
+import { CalendarDays, CheckSquare2, ChevronRight, HeartHandshake, Menu, Settings2, UsersRound } from "lucide-react";
 import { useState } from "react";
 import { signOutUser } from "@/app/actions/sign-out";
 import { Brand } from "@/components/brand";
@@ -20,6 +20,7 @@ const links = [
   { href: "/calendar", label: "Calendario", icon: CalendarDays },
   { href: "/tasks", label: "Attività", icon: CheckSquare2 },
   { href: "/family", label: "La famiglia", icon: UsersRound },
+  { href: "/account", label: "Il mio account", icon: Settings2 },
 ];
 
 export function AppShell({ children, familyName, userName, roleName, avatarColor, isAdmin }: AppShellProps) {

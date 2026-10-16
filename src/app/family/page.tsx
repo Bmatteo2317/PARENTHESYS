@@ -51,7 +51,7 @@ export default async function FamilyPage() {
         <section className="panel">
           <div className="panel-heading"><div><h2>Profili dei figli</h2><p>Ogni profilo ha il suo calendario, colore e impegni.</p></div><span className="count-badge">{kids.length}</span></div>
           {!kids.length && <p className="muted-copy">Non ci sono ancora profili. Potrai aggiungerli qui.</p>}
-          {kids.map((kid) => <div className="kid-card" key={kid.id}><span className="avatar" style={{ background: kid.avatarColor }}>{kid.name.trim().split(/\s+/).slice(0, 2).map((part: string) => part[0]).join("").toUpperCase()}</span><span><strong>{kid.name}</strong><small>{kid.birthDate ? `Nato/a il ${new Intl.DateTimeFormat("it-IT", { dateStyle: "medium" }).format(new Date(kid.birthDate))}` : "Profilo familiare"}</small></span></div>)}
+          {kids.map((kid) => <div className="kid-card" key={kid.id}><span className="avatar" style={{ background: kid.avatarColor }}>{kid.name.trim().split(/\s+/).slice(0, 2).map((part: string) => part[0]).join("").toUpperCase()}</span><span><strong>{kid.name}</strong><small>{kid.birthDate ? `Nato/a il ${new Intl.DateTimeFormat("it-IT", { dateStyle: "medium" }).format(new Date(kid.birthDate))}` : "Profilo familiare"}</small><em className="kid-account-note">{kid.birthDate && new Date(kid.birthDate).getTime() <= Date.now() - 14 * 365.25 * 24 * 60 * 60 * 1000 ? "Account personale collegabile" : "Account personale dai 14 anni"}</em></span></div>)}
           {context.isAdmin && <div className="kid-add-wrap"><AddKidForm /></div>}
         </section>
         <section className="panel">
