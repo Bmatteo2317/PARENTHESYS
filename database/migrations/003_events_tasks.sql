@@ -1,0 +1,126 @@
+-- 003: eventi, attività estese, assegnazioni, rotazioni, richieste di aiuto, conversazioni.
+
+ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "preparationMinutes" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "travelMinutes" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "visibility" TEXT NOT NULL DEFAULT 'household';
+ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "flexibility" TEXT NOT NULL DEFAULT 'flexible';
+ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "requiresBooking" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "recurrence" JSONB;
+ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "seriesId" TEXT;
+ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "createdById" TEXT REFERENCES "User"("id") ON DELETE SET NULL;
+ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "emotionalLoad" INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "skipUntil" DATE;
+
+ALTER TABLE "Task" ALTER COLUMN "assignedToId" DROP NOT NULL;
+ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "activityStatus" TEXT NOT NULL DEFAULT 'draft';
+ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "category" TEXT NOT NULL DEFAULT 'household';
+ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "estimatedMinutes" INTEGER NOT NULL DEFAULT 30;
+ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "preparationMinutes" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "travelMinutes" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "coordinationMinutes" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "mentalLoad" INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "physicalLoad" INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "emotionalLoad" INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "urgency" INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "predictability" INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "flexibility" TEXT NOT NULL DEFAULT 'flexible';
+ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "rotates" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "rotationId" TEXT;
+ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "eventId" TEXT REFERENCES "Event"("id") ON DELETE SET NULL;
+ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "careProfileId" TEXT REFERENCES "KidProfile"("id") ON DELETE SET NULL;
+ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "visibility" TEXT NOT NULL DEFAULT 'household';
+ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "dueAt" TIMESTAMP(3);
+ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "createdByMemberId" TEXT;
+ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;
+
+CREATE TABLE IF NOT EXISTS "TaskAssignment" (
+  "id" TEXT PRIMARY KEY,
+  "taskId" TEXT NOT NULL REFERENCES "Task"("id") ON DELETE CASCADE,
+  "userId" TEXT NOT NULL REFERENCES "User"("id") ON DELETE CASCADE,
+  "role" TEXT NOT NULL DEFAULT 'primary',
+  "status" TEXT NOT NULL DEFAULT 'proposed',
+  "source" TEXT NOT NULL DEFAULT 'manual',
+  "explanation" TEXT,
+  "createdById" TEXT REFERENCES "User"("id") ON DELETE SET NULL,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "respondedAt" TIMESTAMP(3)
+);
+
+CREATE TABLE IF NOT EXISTS "Rotation" (
+  "id" TEXT PRIMARY KEY,
+  "familyGroupId" TEXT NOT NULL REFERENCES "FamilyGroup"("id") ON DELETE CASCADE,
+  "title" TEXT NOT NULL,
+  "category" TEXT NOT NULL DEFAULT 'household',
+  "strategy" TEXT NOT NULL DEFAULT 'least_loaded',
+  "participantIds" JSONB NOT NULL DEFAULT '[]'::jsonb,
+  "lastAssignedUserId" TEXT REFERENCES "User"("id") ON DELETE SET NULL,
+  "enabled" BOOLEAN NOT NULL DEFAULT true,
+  "createdById" TEXT REFERENCES "User"("id") ON DELETE SET NULL,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS "SupportRequest" (
+  "id" TEXT PRIMARY KEY,
+  "familyGroupId" TEXT NOT NULL REFERENCES "FamilyGroup"("id") ON DELETE CASCADE,
+  "taskId" TEXT REFERENCES "Task"("id") ON DELETE CASCADE,
+  "eventId" TEXT REFERENCES "Event"("id") ON DELETE CASCADE,
+  "createdById" TEXT NOT NULL REFERENCES "User"("id") ON DELETE CASCADE,
+  "message" TEXT NOT NULL,
+  "reasonType" TEXT NOT NULL DEFAULT 'need_help',
+  "windowStart" TIMESTAMP(3),
+  "windowEnd" TIMESTAMP(3),
+  "status" TEXT NOT NULL DEFAULT 'open',
+  "resolvedByUserId" TEXT REFERENCES "User"("id") ON DELETE SET NULL,
+  "resolvedAt" TIMESTAMP(3),
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS "SupportResponse" (
+  "id" TEXT PRIMARY KEY,
+  "requestId" TEXT NOT NULL REFERENCES "SupportRequest"("id") ON DELETE CASCADE,
+  "userId" TEXT NOT NULL REFERENCES "User"("id") ON DELETE CASCADE,
+  "response" TEXT NOT NULL,
+  "message" TEXT,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS "MessageThread" (
+  "id" TEXT PRIMARY KEY,
+  "familyGroupId" TEXT NOT NULL REFERENCES "FamilyGroup"("id") ON DELETE CASCADE,
+  "subjectType" TEXT NOT NULL DEFAULT 'task',
+  "subjectId" TEXT,
+  "title" TEXT,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS "Message" (
+  "id" TEXT PRIMARY KEY,
+  "threadId" TEXT NOT NULL REFERENCES "MessageThread"("id") ON DELETE CASCADE,
+  "authorId" TEXT REFERENCES "User"("id") ON DELETE SET NULL,
+  "body" TEXT NOT NULL,
+  "kind" TEXT NOT NULL DEFAULT 'text',
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "editedAt" TIMESTAMP(3),
+  "deletedAt" TIMESTAMP(3)
+);
+
+CREATE TABLE IF NOT EXISTS "CareEventHistory" (
+  "id" TEXT PRIMARY KEY,
+  "familyGroupId" TEXT NOT NULL REFERENCES "FamilyGroup"("id") ON DELETE CASCADE,
+  "taskId" TEXT REFERENCES "Task"("id") ON DELETE CASCADE,
+  "eventId" TEXT REFERENCES "Event"("id") ON DELETE CASCADE,
+  "changeType" TEXT NOT NULL,
+  "fromUserId" TEXT REFERENCES "User"("id") ON DELETE SET NULL,
+  "toUserId" TEXT REFERENCES "User"("id") ON DELETE SET NULL,
+  "fromStatus" TEXT,
+  "toStatus" TEXT,
+  "note" TEXT,
+  "actorUserId" TEXT REFERENCES "User"("id") ON DELETE SET NULL,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS "Task_familyGroupId_activityStatus_idx" ON "Task"("familyGroupId", "activityStatus");
+CREATE INDEX IF NOT EXISTS "TaskAssignment_taskId_idx" ON "TaskAssignment"("taskId");
+CREATE INDEX IF NOT EXISTS "TaskAssignment_userId_idx" ON "TaskAssignment"("userId");
+CREATE INDEX IF NOT EXISTS "SupportRequest_familyGroupId_status_idx" ON "SupportRequest"("familyGroupId", "status");
+CREATE INDEX IF NOT EXISTS "Message_threadId_idx" ON "Message"("threadId");

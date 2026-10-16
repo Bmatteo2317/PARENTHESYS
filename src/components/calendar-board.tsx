@@ -4,7 +4,7 @@ import { Category, EventStatus, Permission } from "@/lib/domain";
 import { useRouter } from "next/navigation";
 import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Clock3, MapPin, Plus, TriangleAlert, UsersRound, X } from "lucide-react";
 import { DragEvent, useEffect, useMemo, useState, useTransition } from "react";
-import { claimEvent, createEvent, deleteEvent, moveEvent, updateEvent } from "@/app/actions/calendar";
+import { createEvent, deleteEvent, moveEvent, updateEvent } from "@/app/actions/calendar";
 import { CATEGORY_OPTIONS, CATEGORY_META } from "@/lib/categories";
 import { addCalendarDays, dateKey, italianDate, mondayOffset, startOfLocalDay } from "@/lib/format";
 
@@ -255,22 +255,6 @@ export function CalendarBoard({
     }
   }
 
-  async function claimSelectedEvent(role: "assigned" | "chaperone" | "pickup") {
-    if (!detailEvent) return;
-    const form = new FormData();
-    form.set("id", detailEvent.id);
-    form.set("role", role);
-    try {
-      await claimEvent(form);
-      await refreshEvents();
-      router.refresh();
-      setDetailEvent(null);
-      setToast("Impegno preso in carico.");
-    } catch (error) {
-      setToast(error instanceof Error ? error.message : "Non è stato possibile prendere in carico l’impegno.");
-    }
-  }
-
   async function removeEvent(id: string) {
     const form = new FormData();
     form.set("id", id);
@@ -516,16 +500,6 @@ export function CalendarBoard({
           <div className="detail-pickup"><span>RESPONSABILE E ACCOMPAGNAMENTO</span><strong>{event.assignedUser ? `Responsabile: ${event.assignedUser.name}` : "Responsabile: da assegnare"}{event.chaperoneUser ? ` · Accompagna: ${event.chaperoneUser.name}` : ""}{event.pickupUser ? ` · Riprende: ${event.pickupUser.name}` : ""}</strong></div>
           <div className="detail-status"><span className={`status-dot ${conflict ? "status-conflict" : status === "Confermato" ? "" : "status-unassigned"}`} />{status}{conflict ? " · Verifica gli orari sovrapposti" : ""}</div>
           {event.description && <p className="detail-notes">{event.description}</p>}
-          {canManage && (!event.assignedUser || !event.chaperoneUser || !event.pickupUser) && (
-            <div className="detail-takeover">
-              <span>PRENDI IN CARICO</span>
-              <div className="takeover-actions">
-                {!event.assignedUser && <button className="outline-button small-button" type="button" onClick={() => void claimSelectedEvent("assigned")}>Faccio io</button>}
-                {!event.chaperoneUser && <button className="outline-button small-button" type="button" onClick={() => void claimSelectedEvent("chaperone")}>Accompagno</button>}
-                {!event.pickupUser && <button className="outline-button small-button" type="button" onClick={() => void claimSelectedEvent("pickup")}>Vado a prendere</button>}
-              </div>
-            </div>
-          )}
           <div className="form-footer">
             <button className="outline-button" type="button" onClick={() => setToast("Per inviare notifiche, configura il servizio email o push.")}>Invia promemoria</button>
             {canManage && <button className="primary-button" type="button" onClick={() => showModal(selected, 9, event)}>Modifica</button>}

@@ -32,7 +32,7 @@ function parseEvent(formData: FormData) {
 async function validateFamilyUsers(familyId: string, userIds: string[]) {
   const ids = [...new Set(userIds.filter(Boolean))];
   if (!ids.length) return;
-  const members = (await db`SELECT "userId" FROM "FamilyMember" WHERE "familyGroupId" = ${familyId}`) as Array<{ userId: string }>;
+  const members = await db`SELECT "userId" FROM "FamilyMember" WHERE "familyGroupId" = ${familyId}`;
   const validIds = new Set(members.map((member) => member.userId));
   if (ids.some((id) => !validIds.has(id))) {
     throw new Error("Un familiare selezionato non appartiene a questo gruppo.");
@@ -40,14 +40,14 @@ async function validateFamilyUsers(familyId: string, userIds: string[]) {
 }
 
 async function memberConflicts(familyId: string, userId: string, start: Date, end: Date, excludeEventId?: string) {
-  const conflicts = (await db`
+  const conflicts = await db`
     SELECT "id" FROM "Event"
     WHERE "familyGroupId" = ${familyId}
       AND (${excludeEventId ?? null}::text IS NULL OR "id" <> ${excludeEventId ?? null})
       AND "startTime" < ${end} AND "endTime" > ${start}
       AND ("assignedUserId" = ${userId} OR "chaperoneUserId" = ${userId} OR "pickupUserId" = ${userId})
     LIMIT 1
-  `) as Array<{ id: string }>;
+  `;
   return conflicts.length > 0;
 }
 
@@ -262,28 +262,6 @@ export async function deleteEvent(formData: FormData) {
   if (!id.success) throw new Error("Impegno non valido.");
   await db`DELETE FROM "Event" WHERE "id" = ${id.data} AND "familyGroupId" = ${context.familyId}`;
   revalidatePath("/calendar");
-}
-
-export async function claimEvent(formData: FormData) {
-  const context = await requireFamilyCoordinator();
-  const id = z.string().min(1).safeParse(formData.get("id"));
-  const role = z.enum(["assigned", "chaperone", "pickup"]).safeParse(formData.get("role"));
-  if (!id.success || !role.success) throw new Error("Presa in carico non valida.");
-  const [event] = await db`
-    SELECT "id", "assignedUserId", "chaperoneUserId", "pickupUserId"
-    FROM "Event" WHERE "id" = ${id.data} AND "familyGroupId" = ${context.familyId} LIMIT 1
-  `;
-  if (!event) throw new Error("Impegno non trovato.");
-  if (role.data === "chaperone") {
-    await db`UPDATE "Event" SET "chaperoneUserId" = ${context.userId}, "status" = ${EventStatus.CONFIRMED}, "updatedAt" = NOW() WHERE "id" = ${event.id} AND "familyGroupId" = ${context.familyId}`;
-  } else if (role.data === "pickup") {
-    await db`UPDATE "Event" SET "pickupUserId" = ${context.userId}, "status" = ${EventStatus.CONFIRMED}, "updatedAt" = NOW() WHERE "id" = ${event.id} AND "familyGroupId" = ${context.familyId}`;
-  } else {
-    await db`UPDATE "Event" SET "assignedUserId" = ${context.userId}, "status" = ${EventStatus.CONFIRMED}, "updatedAt" = NOW() WHERE "id" = ${event.id} AND "familyGroupId" = ${context.familyId}`;
-  }
-  revalidatePath("/calendar");
-  revalidatePath("/tasks");
-  return { success: true };
 }
 
 export async function moveEvent(formData: FormData) {

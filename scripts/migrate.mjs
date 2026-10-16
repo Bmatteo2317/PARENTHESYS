@@ -1,105 +1,88 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { neon } from "@neondatabase/serverless";
-
-function splitSqlStatements(sql) {
-  const statements = [];
-  let start = 0;
-  let quote = null;
-  let dollarQuote = null;
-  let lineComment = false;
-  let blockCommentDepth = 0;
-
-  for (let index = 0; index < sql.length; index += 1) {
-    const current = sql[index];
-    const next = sql[index + 1];
-
-    if (lineComment) {
-      if (current === "\n") lineComment = false;
-      continue;
-    }
-    if (blockCommentDepth > 0) {
-      if (current === "/" && next === "*") {
-        blockCommentDepth += 1;
-        index += 1;
-      } else if (current === "*" && next === "/") {
-        blockCommentDepth -= 1;
-        index += 1;
-      }
-      continue;
-    }
-    if (dollarQuote) {
-      if (sql.startsWith(dollarQuote, index)) {
-        index += dollarQuote.length - 1;
-        dollarQuote = null;
-      }
-      continue;
-    }
-    if (quote) {
-      if (current === quote && next === quote) {
-        index += 1;
-      } else if (current === quote) {
-        quote = null;
-      }
-      continue;
-    }
-
-    if (current === "-" && next === "-") {
-      lineComment = true;
-      index += 1;
-    } else if (current === "/" && next === "*") {
-      blockCommentDepth = 1;
-      index += 1;
-    } else if (current === "'" || current === '"') {
-      quote = current;
-    } else if (current === "$") {
-      const tag = /^\$(?:[a-z_][a-z0-9_]*)?\$/i.exec(sql.slice(index))?.[0];
-      if (tag) {
-        dollarQuote = tag;
-        index += tag.length - 1;
-      }
-    } else if (current === ";") {
-      const statement = sql.slice(start, index).trim();
-      if (statement) statements.push(statement);
-      start = index + 1;
-    }
-  }
-
-  if (quote || dollarQuote || blockCommentDepth > 0) {
-    throw new Error("Migrazione SQL non valida: stringa o commento non terminato.");
-  }
-
-  const remainder = sql.slice(start).trim();
-  if (remainder) statements.push(remainder);
-  return statements;
-}
-
-const migrationsDirectory = new URL("../database/migrations/", import.meta.url);
-const migrationsPath = fileURLToPath(migrationsDirectory);
-const migrationFiles = (await readdir(migrationsPath))
-  .filter((file) => /^\d+_[a-z0-9_-]+\.sql$/i.test(file))
-  .sort();
-if (migrationFiles.length === 0) {
-  throw new Error("Non sono state trovate migrazioni SQL in database/migrations.");
-}
-
-const migrations = await Promise.all(migrationFiles.map(async (file) => ({
-  name: file.slice(0, -4),
-  statements: splitSqlStatements(await readFile(new URL(file, migrationsDirectory), "utf8")),
-})));
-
-if (process.argv.includes("--check")) {
-  for (const migration of migrations) {
-    console.log(`${migration.name}: ${migration.statements.length} istruzioni SQL valide.`);
-  }
-  process.exit(0);
-}
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
   throw new Error("Configura DATABASE_URL prima di avviare le migrazioni.");
 }
+
 const sql = neon(connectionString);
+const migrationsDir = fileURLToPath(new URL("../database/migrations/", import.meta.url));
+
+// Divide un file SQL in statement, rispettando stringhe, commenti e dollar-quoting ($$ ... $$).
+function splitStatements(source) {
+  const statements = [];
+  let current = "";
+  let quote = null; // ' | " | $tag$
+  let dollarTag = null;
+  let lineComment = false;
+  let blockComment = false;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    const next = source[index + 1];
+    const rest = source.slice(index);
+
+    if (lineComment) {
+      if (char === "\n") lineComment = false;
+      else continue;
+    } else if (blockComment) {
+      if (char === "*" && next === "/") {
+        blockComment = false;
+        index += 1;
+        continue;
+      }
+      current += char;
+      continue;
+    } else if (dollarTag) {
+      if (rest.startsWith(dollarTag)) {
+        current += dollarTag;
+        index += dollarTag.length - 1;
+        dollarTag = null;
+        continue;
+      }
+    } else if (quote) {
+      if (char === quote) {
+        if (next === quote) {
+          current += char + next;
+          index += 1;
+          continue;
+        }
+        quote = null;
+      }
+    } else {
+      if (char === "-" && next === "-") {
+        lineComment = true;
+        index += 1;
+        continue;
+      }
+      if (char === "/" && next === "*") {
+        blockComment = true;
+        index += 1;
+        continue;
+      }
+      if (char === "'" || char === '"') {
+        quote = char;
+      } else if (char === "$") {
+        const match = /^\$[A-Za-z_0-9]*\$/.exec(rest);
+        if (match) {
+          dollarTag = match[0];
+          current += dollarTag;
+          index += dollarTag.length - 1;
+          continue;
+        }
+      } else if (char === ";") {
+        if (current.trim()) statements.push(current.trim());
+        current = "";
+        continue;
+      }
+    }
+    current += char;
+  }
+  if (current.trim()) statements.push(current.trim());
+  return statements;
+}
 
 await sql`
   CREATE TABLE IF NOT EXISTS "_Migrations" (
@@ -107,18 +90,25 @@ await sql`
     "appliedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
   )
 `;
-for (const migrationFile of migrationFiles) {
-  const migrationName = migrationFile.slice(0, -4);
-  const [applied] = await sql`SELECT "name" FROM "_Migrations" WHERE "name" = ${migrationName} LIMIT 1`;
+
+const files = (await readdir(migrationsDir))
+  .filter((file) => file.endsWith(".sql"))
+  .sort();
+
+for (const file of files) {
+  const name = file.replace(/\.sql$/, "");
+  const [applied] = await sql`SELECT "name" FROM "_Migrations" WHERE "name" = ${name} LIMIT 1`;
   if (applied) {
-    console.log(`Migrazione ${migrationName} già applicata.`);
+    console.log(`Migrazione ${name} già applicata.`);
     continue;
   }
-
-  const migration = migrations.find((item) => item.name === migrationName);
-  await sql.transaction((transaction) => [
-    ...migration.statements.map((statement) => transaction.query(statement)),
-    transaction`INSERT INTO "_Migrations" ("name") VALUES (${migrationName})`,
-  ]);
-  console.log(`Migrazione ${migrationName} applicata.`);
+  const source = await readFile(`${migrationsDir}${file}`, "utf8");
+  const statements = splitStatements(source);
+  for (const statement of statements) {
+    await sql.query(statement);
+  }
+  await sql`INSERT INTO "_Migrations" ("name") VALUES (${name})`;
+  console.log(`Migrazione ${name} applicata (${statements.length} statement).`);
 }
+
+console.log("Tutte le migrazioni sono aggiornate.");

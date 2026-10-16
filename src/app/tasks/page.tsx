@@ -3,13 +3,12 @@ import { AppPage } from "@/components/app-page";
 import { getFamilyContext } from "@/lib/family";
 import { db } from "@/lib/db";
 import { TaskBoard } from "@/components/task-board";
-import { SupportRequestsBoard } from "@/components/support-requests-board";
 
 export const dynamic = "force-dynamic";
 
 export default async function TasksPage() {
   const context = await getFamilyContext();
-  const [tasks, members, supportRequests] = await Promise.all([
+  const [tasks, members] = await Promise.all([
     db`
       SELECT t."id", t."title", t."description", t."status", t."dueDate", t."points", t."assignedToId",
         jsonb_build_object('id', u."id", 'name', u."name", 'avatarColor', u."avatarColor") AS "assignedTo"
@@ -22,16 +21,6 @@ export default async function TasksPage() {
       SELECT u."id", u."name" FROM "FamilyMember" fm
       JOIN "User" u ON u."id" = fm."userId"
       WHERE fm."familyGroupId" = ${context.familyId} ORDER BY fm."joinedAt" ASC
-    `,
-    db`
-      SELECT request."id", request."title", request."description", request."neededBy", request."status",
-        request."createdById", creator."name" AS "createdByName",
-        request."claimedById", claimant."name" AS "claimedByName"
-      FROM "SupportRequest" request
-      JOIN "User" creator ON creator."id" = request."createdById"
-      LEFT JOIN "User" claimant ON claimant."id" = request."claimedById"
-      WHERE request."familyGroupId" = ${context.familyId} AND request."status" IN ('OPEN', 'CLAIMED')
-      ORDER BY CASE WHEN request."status" = 'OPEN' THEN 0 ELSE 1 END, request."neededBy" ASC
     `,
   ]);
   const pending = tasks.filter((task) => task.status !== TaskStatus.COMPLETED).length;
@@ -54,17 +43,6 @@ export default async function TasksPage() {
           people={members.map((member) => ({ id: member.user.id, name: member.user.name }))}
           canManage={context.isAdmin || context.membership.permission === "HELPER"}
         />
-        <SupportRequestsBoard requests={supportRequests.map((request) => ({
-          id: request.id,
-          title: request.title,
-          description: request.description,
-          neededBy: String(request.neededBy).slice(0, 10),
-          status: request.status,
-          createdById: request.createdById,
-          createdByName: request.createdByName,
-          claimedById: request.claimedById,
-          claimedByName: request.claimedByName,
-        }))} currentUserId={context.userId} />
       </div>
     </AppPage>
   );

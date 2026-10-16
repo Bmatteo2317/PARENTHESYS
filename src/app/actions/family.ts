@@ -11,7 +11,6 @@ import { isCalendarDate } from "@/lib/datetime";
 
 const roleSchema = z.string().trim().min(2).max(40);
 const familyNameSchema = z.string().trim().min(2).max(80);
-const phoneSchema = z.string().trim().max(30).regex(/^[+\d\s().-]*$/);
 export type FamilyActionState = { error?: string };
 
 function newInviteCode() {
@@ -45,7 +44,7 @@ export async function createFamily(_previous: FamilyActionState, formData: FormD
   }
 
   revalidatePath("/", "layout");
-  redirect("/calendar");
+  redirect("/careboard");
 }
 
 async function getFamilyContextWithoutMembership() {
@@ -53,7 +52,7 @@ async function getFamilyContextWithoutMembership() {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
   const existing = await db`SELECT "id" FROM "FamilyMember" WHERE "userId" = ${session.user.id} LIMIT 1`;
-  if (existing.length) redirect("/calendar");
+  if (existing.length) redirect("/careboard");
   return { userId: session.user.id };
 }
 
@@ -79,19 +78,7 @@ export async function joinFamily(_previous: FamilyActionState, formData: FormDat
   }
 
   revalidatePath("/", "layout");
-  redirect("/calendar");
-}
-
-export async function updateAccount(formData: FormData) {
-  const context = await getFamilyContext();
-  const name = z.string().trim().min(2).max(80).safeParse(formData.get("name"));
-  const phone = phoneSchema.safeParse(formData.get("phone") || "");
-  const avatarColor = z.string().regex(/^#[0-9A-Fa-f]{6}$/).safeParse(formData.get("avatarColor"));
-  if (!name.success || !phone.success || !avatarColor.success) throw new Error("Controlla nome, cellulare e colore del profilo.");
-  await db`UPDATE "User" SET "name" = ${name.data}, "phone" = ${phone.data || null}, "avatarColor" = ${avatarColor.data}, "updatedAt" = NOW() WHERE "id" = ${context.userId}`;
-  revalidatePath("/account");
-  revalidatePath("/calendar");
-  revalidatePath("/family");
+  redirect("/careboard");
 }
 
 export async function addKid(formData: FormData) {
@@ -142,12 +129,9 @@ export async function linkMemberToKid(formData: FormData) {
   if (!member) throw new Error("Il membro selezionato non appartiene a questa famiglia.");
   if (kidProfileId.data) {
     const [kid] = await db`
-      SELECT "id", "birthDate" FROM "KidProfile" WHERE "id" = ${kidProfileId.data} AND "familyGroupId" = ${context.familyId} LIMIT 1
+      SELECT "id" FROM "KidProfile" WHERE "id" = ${kidProfileId.data} AND "familyGroupId" = ${context.familyId} LIMIT 1
     `;
     if (!kid) throw new Error("Il profilo del figlio selezionato non appartiene a questa famiglia.");
-    if (!kid.birthDate || new Date(kid.birthDate).getTime() > Date.now() - 14 * 365.25 * 24 * 60 * 60 * 1000) {
-      throw new Error("Un account personale può essere collegato solo a un figlio di almeno 14 anni.");
-    }
   }
   try {
     await db`

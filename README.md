@@ -41,8 +41,5 @@ Non inserire credenziali nel repository. `.env.example` contiene solo valori seg
 - Creazione, modifica, cancellazione, spostamento, filtri e verifica delle sovrapposizioni degli impegni.
 - Suggerimento deterministico del responsabile in base a turni, conflitti e carico della giornata.
 - Attività assegnate e punti facoltativi.
-- Richieste di aiuto familiari senza assegnazione automatica: ogni persona può offrirsi, rinunciare o ritirare la propria richiesta.
 
 L’assegnazione intelligente è locale e deterministica: non invia nomi o calendari familiari a un servizio AI esterno. Notifiche email/push e suggerimenti basati su modelli linguistici non sono attivati.
-
-Le richieste di aiuto usano la migrazione SQL `003_support_requests.sql`. Per applicarla, esegui `npm run db:migrate` con `DATABASE_URL` configurata; il comando applica in ordine soltanto le migrazioni non ancora registrate.

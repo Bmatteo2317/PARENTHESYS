@@ -1,34 +1,28 @@
-import { loadEnvConfig } from "@next/env";
-import { neon } from "@neondatabase/serverless";
+import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 
-loadEnvConfig(process.cwd());
+// Il driver restituisce righe come oggetti indicizzati: tipizziamo il client così, senza union ambigue.
+type Sql = NeonQueryFunction<false, false>;
 
-function getDatabaseUrl() {
-  return [
-    process.env.DATABASE_URL,
-    process.env.NEON_DATABASE_URL,
-    process.env.NEON_POSTGRES_URL,
-    process.env.NEON_POSTGRES_PRISMA_URL,
-    process.env.POSTGRES_URL,
-  ].find((value) => typeof value === "string" && value.trim().length > 0)?.trim();
-}
+let client: Sql | null = null;
 
-let client: ReturnType<typeof neon> | undefined;
-
-function getClient() {
-  if (client) return client;
-
-  const databaseUrl = getDatabaseUrl();
-  if (!databaseUrl) {
-    throw new Error("Nessuna URL di connessione Neon valida è configurata.");
+function connect(): Sql {
+  if (!client) {
+    const databaseUrl = process.env.DATABASE_URL;
+    if (!databaseUrl) throw new Error("DATABASE_URL non è configurata.");
+    client = neon(databaseUrl);
   }
-
-  client = neon(databaseUrl);
   return client;
 }
 
-type DatabaseRow = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
-
-export const db = ((strings: TemplateStringsArray, ...values: unknown[]) => {
-  return getClient()(strings, ...values) as Promise<DatabaseRow[]>;
-}) as (strings: TemplateStringsArray, ...values: unknown[]) => Promise<DatabaseRow[]>;
+// Client pigro: la connessione viene creata alla prima query, così il build non richiede il database.
+export const db = new Proxy(function () {} as unknown as Sql, {
+  apply(_target, _thisArg, args: unknown[]) {
+    const sql = connect() as unknown as (...input: unknown[]) => unknown;
+    return sql(...args);
+  },
+  get(_target, property) {
+    const sql = connect() as unknown as Record<string | symbol, unknown>;
+    const value = sql[property];
+    return typeof value === "function" ? value.bind(sql) : value;
+  },
+}) as Sql;

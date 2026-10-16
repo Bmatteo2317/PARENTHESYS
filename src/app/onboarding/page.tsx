@@ -10,7 +10,7 @@ export default async function OnboardingPage() {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
   const [membership] = await db`SELECT "id" FROM "FamilyMember" WHERE "userId" = ${session.user.id} LIMIT 1`;
-  if (membership) redirect("/calendar");
+  if (membership) redirect("/careboard");
 
   return (
     <main className="onboarding-shell">
