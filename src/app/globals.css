@@ -194,7 +194,11 @@ a { color: inherit; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #94aa72; }
 .status-dot.status-conflict { background: #e48148; }
 .status-dot.status-unassigned { background: #d4a64f; }
-.detail-notes { margin: 12px 0 0; padding: 10px; border-radius: 7px; background: #fbfaf8; color: #706a74; font-size: 9px; line-height: 1.55; white-space: pre-wrap; }
+  .detail-notes { margin: 12px 0 0; padding: 10px; border-radius: 7px; background: #fbfaf8; color: #706a74; font-size: 9px; line-height: 1.55; white-space: pre-wrap; }
+  .detail-takeover { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; padding: 10px; border: 1px solid #e7dff2; border-radius: 8px; background: #faf7ff; }
+  .detail-takeover > span { color: var(--purple); font-size: 8px; font-weight: 800; letter-spacing: .08em; }
+  .takeover-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
 .content-page { width: min(100%, 1060px); margin: 0 auto; }
 .eyebrow { display: block; margin-bottom: 6px; color: var(--purple); font-size: 8px; font-weight: 800; letter-spacing: .12em; }
 .account-page { max-width: 820px; }

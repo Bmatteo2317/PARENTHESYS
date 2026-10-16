@@ -264,6 +264,28 @@ export async function deleteEvent(formData: FormData) {
   revalidatePath("/calendar");
 }
 
+export async function claimEvent(formData: FormData) {
+  const context = await requireFamilyCoordinator();
+  const id = z.string().min(1).safeParse(formData.get("id"));
+  const role = z.enum(["assigned", "chaperone", "pickup"]).safeParse(formData.get("role"));
+  if (!id.success || !role.success) throw new Error("Presa in carico non valida.");
+  const [event] = await db`
+    SELECT "id", "assignedUserId", "chaperoneUserId", "pickupUserId"
+    FROM "Event" WHERE "id" = ${id.data} AND "familyGroupId" = ${context.familyId} LIMIT 1
+  `;
+  if (!event) throw new Error("Impegno non trovato.");
+  if (role.data === "chaperone") {
+    await db`UPDATE "Event" SET "chaperoneUserId" = ${context.userId}, "status" = ${EventStatus.CONFIRMED}, "updatedAt" = NOW() WHERE "id" = ${event.id} AND "familyGroupId" = ${context.familyId}`;
+  } else if (role.data === "pickup") {
+    await db`UPDATE "Event" SET "pickupUserId" = ${context.userId}, "status" = ${EventStatus.CONFIRMED}, "updatedAt" = NOW() WHERE "id" = ${event.id} AND "familyGroupId" = ${context.familyId}`;
+  } else {
+    await db`UPDATE "Event" SET "assignedUserId" = ${context.userId}, "status" = ${EventStatus.CONFIRMED}, "updatedAt" = NOW() WHERE "id" = ${event.id} AND "familyGroupId" = ${context.familyId}`;
+  }
+  revalidatePath("/calendar");
+  revalidatePath("/tasks");
+  return { success: true };
+}
+
 export async function moveEvent(formData: FormData) {
   const context = await requireFamilyCoordinator();
   const id = z.string().min(1).safeParse(formData.get("id"));
