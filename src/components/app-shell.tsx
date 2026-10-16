@@ -13,6 +13,7 @@ type AppShellProps = {
   userName: string;
   roleName: string;
   avatarColor: string;
+  isAdmin: boolean;
 };
 
 const links = [
@@ -21,7 +22,7 @@ const links = [
   { href: "/family", label: "La famiglia", icon: UsersRound },
 ];
 
-export function AppShell({ children, familyName, userName, roleName, avatarColor }: AppShellProps) {
+export function AppShell({ children, familyName, userName, roleName, avatarColor, isAdmin }: AppShellProps) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const initials = userName.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
@@ -45,7 +46,7 @@ export function AppShell({ children, familyName, userName, roleName, avatarColor
           </div>
           <nav className="nav-section" aria-label="Navigazione principale">
             <div className="nav-caption">La vostra organizzazione</div>
-            {links.map(({ href, label, icon: Icon }) => (
+            {links.filter((link) => link.href !== "/family" || isAdmin).map(({ href, label, icon: Icon }) => (
               <Link className={`nav-link ${pathname === href ? "active" : ""}`} href={href} key={href} onClick={() => setMenuOpen(false)}>
                 <Icon size={15} />{label}{pathname === href && <ChevronRight className="nav-end-icon" size={12} />}
               </Link>

@@ -1,4 +1,4 @@
-import { Category } from "@prisma/client";
+import { Category } from "@/lib/domain";
 
 export const CATEGORY_META: Record<Category, { label: string; color: string; soft: string; icon: string }> = {
   WORK: { label: "Lavoro", color: "#8b78bd", soft: "#f0eafb", icon: "▣" },

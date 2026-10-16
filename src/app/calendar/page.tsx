@@ -1,8 +1,8 @@
-import { Category } from "@prisma/client";
+import { Category } from "@/lib/domain";
 import { CalendarBoard, BoardEvent, BoardPerson } from "@/components/calendar-board";
 import { AppPage } from "@/components/app-page";
 import { dateTimeFromLocal } from "@/lib/datetime";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
 import { getFamilyContext } from "@/lib/family";
 import { dateKey, mondayOffset } from "@/lib/format";
 
@@ -18,59 +18,53 @@ export default async function CalendarPage() {
   endDate.setDate(endDate.getDate() + 42);
   const startKey = dateKey(startDate);
   const endKey = dateKey(endDate);
+  const seeAll = context.membership.permission !== "MEMBER";
+  const memberId = context.membership.id;
+  const kidProfileId = context.membership.kidProfileId;
+  const rangeStart = dateTimeFromLocal(startKey, "00:00", context.family.timezone);
+  const rangeEnd = dateTimeFromLocal(endKey, "00:00", context.family.timezone);
 
   const [memberships, kids, events] = await Promise.all([
-    prisma.familyMember.findMany({
-      where: {
-        familyGroupId: context.familyId,
-        ...(context.membership.permission === "MEMBER" ? { id: context.membership.id } : {}),
-      },
-      include: {
-        user: { select: { id: true, name: true, avatarColor: true } },
-        kidProfile: { select: { id: true, name: true, avatarColor: true } },
-      },
-      orderBy: { joinedAt: "asc" },
-    }),
-    prisma.kidProfile.findMany({
-      where: {
-        familyGroupId: context.familyId,
-        ...(context.membership.permission === "MEMBER" ? { id: context.membership.kidProfileId ?? "__no_linked_child__" } : {}),
-      },
-      orderBy: { createdAt: "asc" },
-    }),
-    prisma.event.findMany({
-      where: {
-        familyGroupId: context.familyId,
-        startTime: { gte: dateTimeFromLocal(startKey, "00:00", context.family.timezone), lt: dateTimeFromLocal(endKey, "00:00", context.family.timezone) },
-        ...(context.membership.permission === "MEMBER"
-          ? {
-              OR: [
-                { assignedUserId: context.userId },
-                { chaperoneUserId: context.userId },
-                { pickupUserId: context.userId },
-                ...(context.membership.kidProfileId ? [{ kidProfileId: context.membership.kidProfileId }] : []),
-              ],
-            }
-          : {}),
-      },
-      orderBy: { startTime: "asc" },
-      include: {
-        assignedUser: { select: { id: true, name: true, avatarColor: true } },
-        chaperoneUser: { select: { id: true, name: true } },
-        pickupUser: { select: { id: true, name: true } },
-        kidProfile: { select: { id: true, name: true, avatarColor: true } },
-      },
-    }),
+    db`
+      SELECT fm."roleName", fm."permission", u."id" AS "userId", u."name" AS "userName", u."avatarColor" AS "userColor",
+        kp."id" AS "kidId", kp."name" AS "kidName", kp."avatarColor" AS "kidColor"
+      FROM "FamilyMember" fm JOIN "User" u ON u."id" = fm."userId"
+      LEFT JOIN "KidProfile" kp ON kp."id" = fm."kidProfileId"
+      WHERE fm."familyGroupId" = ${context.familyId} AND (${seeAll} OR fm."id" = ${memberId})
+      ORDER BY fm."joinedAt" ASC
+    `,
+    db`
+      SELECT "id", "name", "avatarColor" FROM "KidProfile"
+      WHERE "familyGroupId" = ${context.familyId} AND (${seeAll} OR "id" = ${kidProfileId})
+      ORDER BY "createdAt" ASC
+    `,
+    db`
+      SELECT e."id", e."title", e."description", e."location", e."startTime", e."endTime", e."category",
+        e."status", e."assignedUserId",
+        CASE WHEN au."id" IS NULL THEN NULL ELSE jsonb_build_object('id', au."id", 'name', au."name", 'avatarColor', au."avatarColor") END AS "assignedUser",
+        CASE WHEN cu."id" IS NULL THEN NULL ELSE jsonb_build_object('id', cu."id", 'name', cu."name") END AS "chaperoneUser",
+        CASE WHEN pu."id" IS NULL THEN NULL ELSE jsonb_build_object('id', pu."id", 'name', pu."name") END AS "pickupUser",
+        CASE WHEN kp."id" IS NULL THEN NULL ELSE jsonb_build_object('id', kp."id", 'name', kp."name", 'avatarColor', kp."avatarColor") END AS "kidProfile"
+      FROM "Event" e
+      LEFT JOIN "User" au ON au."id" = e."assignedUserId"
+      LEFT JOIN "User" cu ON cu."id" = e."chaperoneUserId"
+      LEFT JOIN "User" pu ON pu."id" = e."pickupUserId"
+      LEFT JOIN "KidProfile" kp ON kp."id" = e."kidProfileId"
+      WHERE e."familyGroupId" = ${context.familyId} AND e."startTime" >= ${rangeStart} AND e."startTime" < ${rangeEnd}
+        AND (${seeAll} OR e."assignedUserId" = ${context.userId} OR e."chaperoneUserId" = ${context.userId}
+          OR e."pickupUserId" = ${context.userId} OR (${kidProfileId !== null} AND e."kidProfileId" = ${kidProfileId}))
+      ORDER BY e."startTime" ASC
+    `,
   ]);
 
   const people: BoardPerson[] = [
     ...memberships.map((membership) => ({
-      id: `user:${membership.user.id}`,
-      userId: membership.user.id,
-      name: membership.user.name,
+      id: `user:${membership.userId}`,
+      userId: membership.userId,
+      name: membership.userName,
       role: membership.roleName,
-      color: membership.user.avatarColor,
-      initials: membership.user.name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase(),
+      color: membership.userColor,
+      initials: membership.userName.split(/\s+/).slice(0, 2).map((part: string) => part[0]).join("").toUpperCase(),
       type: "user" as const,
       permission: membership.permission,
     })),
@@ -80,7 +74,7 @@ export default async function CalendarPage() {
       name: kid.name,
       role: "Figlio",
       color: kid.avatarColor,
-      initials: kid.name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase(),
+      initials: kid.name.split(/\s+/).slice(0, 2).map((part: string) => part[0]).join("").toUpperCase(),
       type: "kid" as const,
       permission: "MEMBER" as const,
     })),
@@ -91,8 +85,8 @@ export default async function CalendarPage() {
     title: event.title,
     description: event.description,
     location: event.location,
-    startTime: event.startTime.toISOString(),
-    endTime: event.endTime.toISOString(),
+    startTime: new Date(event.startTime).toISOString(),
+    endTime: new Date(event.endTime).toISOString(),
     category: event.category as Category,
     status: event.status,
     assignedUserId: event.assignedUserId,

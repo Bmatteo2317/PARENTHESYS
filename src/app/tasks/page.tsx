@@ -1,7 +1,7 @@
-import { TaskStatus } from "@prisma/client";
+import { TaskStatus } from "@/lib/domain";
 import { AppPage } from "@/components/app-page";
 import { getFamilyContext } from "@/lib/family";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
 import { TaskBoard } from "@/components/task-board";
 
 export const dynamic = "force-dynamic";
@@ -9,16 +9,19 @@ export const dynamic = "force-dynamic";
 export default async function TasksPage() {
   const context = await getFamilyContext();
   const [tasks, members] = await Promise.all([
-    prisma.task.findMany({
-      where: { familyGroupId: context.familyId, ...(context.membership.permission === "MEMBER" ? { assignedToId: context.userId } : {}) },
-      include: { assignedTo: { select: { id: true, name: true, avatarColor: true } } },
-      orderBy: [{ status: "asc" }, { dueDate: "asc" }],
-    }),
-    prisma.familyMember.findMany({
-      where: { familyGroupId: context.familyId },
-      include: { user: { select: { id: true, name: true } } },
-      orderBy: { joinedAt: "asc" },
-    }),
+    db`
+      SELECT t."id", t."title", t."description", t."status", t."dueDate", t."points", t."assignedToId",
+        jsonb_build_object('id', u."id", 'name', u."name", 'avatarColor', u."avatarColor") AS "assignedTo"
+      FROM "Task" t JOIN "User" u ON u."id" = t."assignedToId"
+      WHERE t."familyGroupId" = ${context.familyId}
+        AND (${context.membership.permission !== "MEMBER"} OR t."assignedToId" = ${context.userId})
+      ORDER BY t."status" ASC, t."dueDate" ASC
+    `,
+    db`
+      SELECT u."id", u."name" FROM "FamilyMember" fm
+      JOIN "User" u ON u."id" = fm."userId"
+      WHERE fm."familyGroupId" = ${context.familyId} ORDER BY fm."joinedAt" ASC
+    `,
   ]);
   const pending = tasks.filter((task) => task.status !== TaskStatus.COMPLETED).length;
 
@@ -32,7 +35,7 @@ export default async function TasksPage() {
             title: task.title,
             description: task.description,
             status: task.status,
-            dueDate: task.dueDate.toISOString(),
+            dueDate: new Date(task.dueDate).toISOString(),
             points: task.points,
             assignedToId: task.assignedToId,
             assignedTo: task.assignedTo,

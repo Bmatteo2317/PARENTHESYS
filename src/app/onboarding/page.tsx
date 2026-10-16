@@ -2,14 +2,14 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { Brand } from "@/components/brand";
 import { CreateFamilyForm, JoinFamilyForm } from "@/components/onboarding-forms";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
 export default async function OnboardingPage() {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
-  const membership = await prisma.familyMember.findFirst({ where: { userId: session.user.id } });
+  const [membership] = await db`SELECT "id" FROM "FamilyMember" WHERE "userId" = ${session.user.id} LIMIT 1`;
   if (membership) redirect("/calendar");
 
   return (

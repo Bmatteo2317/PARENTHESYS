@@ -1,12 +1,11 @@
 "use server";
 
 import { hash } from "bcryptjs";
-import { Prisma } from "@prisma/client";
 import { AuthError } from "next-auth";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { signIn } from "@/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
 
 const registrationSchema = z.object({
   name: z.string().trim().min(2, "Inserisci il tuo nome.").max(60),
@@ -52,15 +51,13 @@ export async function registerUser(_previous: RegistrationState, formData: FormD
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Controlla i dati inseriti." };
 
   try {
-    await prisma.user.create({
-      data: {
-        name: parsed.data.name,
-        email: parsed.data.email.toLowerCase(),
-        passwordHash: await hash(parsed.data.password, 12),
-      },
-    });
+    await db`
+      INSERT INTO "User" ("id", "name", "email", "passwordHash", "updatedAt")
+      VALUES (gen_random_uuid()::text, ${parsed.data.name}, ${parsed.data.email.toLowerCase()},
+        ${await hash(parsed.data.password, 12)}, NOW())
+    `;
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "23505") {
       return { error: "Questo indirizzo email è già registrato." };
     }
     console.error("Registrazione non riuscita.", error);

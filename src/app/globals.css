@@ -91,6 +91,7 @@ a { color: inherit; }
 .sidebar-footer { display: flex; align-items: center; gap: 6px; padding: 10px 2px 0; border-top: 1px solid #f0eeeb; color: #97929a; font-size: 8px; }
 .sync-dot { width: 6px; height: 6px; border-radius: 50%; background: #94aa72; }
 .main-panel { min-width: 0; flex: 1; padding: 23px 28px 32px; }
+.main-panel:has(.calendar-layout) { padding: 0; }
 .calendar-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .toolbar-left, .toolbar-right { display: flex; align-items: center; }
 .toolbar-left { min-width: 0; gap: 11px; }

@@ -1,18 +1,18 @@
 "use server";
 
-import { Category, EventStatus, Permission, Prisma } from "@prisma/client";
+import { Category, EventStatus, Permission } from "@/lib/domain";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { dateTimeFromLocal } from "@/lib/datetime";
-import { requireAdmin } from "@/lib/family";
-import { prisma } from "@/lib/prisma";
+import { dateTimeFromLocal, isCalendarDate } from "@/lib/datetime";
+import { requireFamilyCoordinator } from "@/lib/family";
+import { db } from "@/lib/db";
 
 const eventSchema = z.object({
   title: z.string().trim().min(1, "Inserisci il titolo dell’impegno.").max(120),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  start: z.string().regex(/^\d{2}:\d{2}$/),
-  end: z.string().regex(/^\d{2}:\d{2}$/),
-  category: z.nativeEnum(Category),
+  date: z.string().refine(isCalendarDate, "Inserisci una data valida."),
+  start: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Inserisci un orario di inizio valido."),
+  end: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Inserisci un orario di fine valido."),
+  category: z.enum(["WORK", "SCHOOL", "SPORT", "HEALTH", "HOUSEHOLD", "LEISURE"]),
   participantId: z.string().optional(),
   assignedUserId: z.string().optional(),
   chaperoneUserId: z.string().optional(),
@@ -32,28 +32,26 @@ function parseEvent(formData: FormData) {
 async function validateFamilyUsers(familyId: string, userIds: string[]) {
   const ids = [...new Set(userIds.filter(Boolean))];
   if (!ids.length) return;
-  const count = await prisma.familyMember.count({ where: { familyGroupId: familyId, userId: { in: ids } } });
-  if (count !== ids.length) throw new Error("Un familiare selezionato non appartiene a questo gruppo.");
+  const members = await db`SELECT "userId" FROM "FamilyMember" WHERE "familyGroupId" = ${familyId}`;
+  const validIds = new Set(members.map((member) => member.userId));
+  if (ids.some((id) => !validIds.has(id))) {
+    throw new Error("Un familiare selezionato non appartiene a questo gruppo.");
+  }
 }
 
 async function memberConflicts(familyId: string, userId: string, start: Date, end: Date, excludeEventId?: string) {
-  return prisma.event.findFirst({
-    where: {
-      familyGroupId: familyId,
-      ...(excludeEventId ? { id: { not: excludeEventId } } : {}),
-      startTime: { lt: end },
-      endTime: { gt: start },
-      OR: [
-        { assignedUserId: userId },
-        { chaperoneUserId: userId },
-        { pickupUserId: userId },
-      ],
-    },
-    select: { id: true },
-  });
+  const conflicts = await db`
+    SELECT "id" FROM "Event"
+    WHERE "familyGroupId" = ${familyId}
+      AND (${excludeEventId ?? null}::text IS NULL OR "id" <> ${excludeEventId ?? null})
+      AND "startTime" < ${end} AND "endTime" > ${start}
+      AND ("assignedUserId" = ${userId} OR "chaperoneUserId" = ${userId} OR "pickupUserId" = ${userId})
+    LIMIT 1
+  `;
+  return conflicts.length > 0;
 }
 
-function hasWorkScheduleConflict(schedule: Prisma.JsonValue | null, start: Date, end: Date, timeZone: string) {
+function hasWorkScheduleConflict(schedule: unknown, start: Date, end: Date, timeZone: string) {
   if (!schedule || typeof schedule !== "object" || Array.isArray(schedule) || !("unavailable" in schedule)) return false;
   const unavailable = schedule.unavailable;
   if (!Array.isArray(unavailable)) return false;
@@ -67,9 +65,8 @@ function hasWorkScheduleConflict(schedule: Prisma.JsonValue | null, start: Date,
   const startParts = Object.fromEntries(parts.formatToParts(start).map((part) => [part.type, part.value]));
   const endParts = Object.fromEntries(parts.formatToParts(end).map((part) => [part.type, part.value]));
   const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(startParts.weekday);
-  const toMinutes = (hour: string, minute: string) => Number(hour) * 60 + Number(minute);
-  const startMinutes = toMinutes(startParts.hour, startParts.minute);
-  const endMinutes = toMinutes(endParts.hour, endParts.minute);
+  const startMinutes = Number(startParts.hour) * 60 + Number(startParts.minute);
+  const endMinutes = Number(endParts.hour) * 60 + Number(endParts.minute);
   return unavailable.some((block) => {
     if (typeof block !== "object" || block === null) return false;
     const item = block as { day?: unknown; start?: unknown; end?: unknown };
@@ -87,10 +84,11 @@ async function chooseAvailableAssignee(
   timeZone: string,
   preferredUserId?: string,
 ) {
-  const memberships = await prisma.familyMember.findMany({
-    where: { familyGroupId: familyId, permission: { in: [Permission.ADMIN, Permission.HELPER] } },
-    include: { user: { select: { id: true, workSchedule: true } } },
-  });
+  const memberships = await db`
+    SELECT fm."permission", u."id" AS "userId", u."workSchedule"
+    FROM "FamilyMember" fm JOIN "User" u ON u."id" = fm."userId"
+    WHERE fm."familyGroupId" = ${familyId} AND fm."permission" IN (${Permission.ADMIN}, ${Permission.HELPER})
+  `;
   const localDate = new Intl.DateTimeFormat("en-CA", {
     timeZone,
     year: "numeric",
@@ -105,52 +103,56 @@ async function chooseAvailableAssignee(
     month: "2-digit",
     day: "2-digit",
   }).format(nextDate);
-  const existingEvents = await prisma.event.findMany({
-    where: {
-      familyGroupId: familyId,
-      startTime: { gte: dateTimeFromLocal(localDate, "00:00", timeZone), lt: dateTimeFromLocal(endOfDay, "00:00", timeZone) },
-    },
-    select: { assignedUserId: true, chaperoneUserId: true, pickupUserId: true },
-  });
+  const existingEvents = await db`
+    SELECT "assignedUserId", "chaperoneUserId", "pickupUserId" FROM "Event"
+    WHERE "familyGroupId" = ${familyId}
+      AND "startTime" < ${dateTimeFromLocal(endOfDay, "00:00", timeZone)}
+      AND "endTime" > ${dateTimeFromLocal(localDate, "00:00", timeZone)}
+  `;
   const workloads = new Map<string, number>();
   for (const event of existingEvents) {
     for (const id of new Set([event.assignedUserId, event.chaperoneUserId, event.pickupUserId].filter(Boolean))) {
-      workloads.set(id!, (workloads.get(id!) ?? 0) + 1);
+      workloads.set(id, (workloads.get(id) ?? 0) + 1);
     }
   }
   const ordered = [...memberships].sort((a, b) => {
     const rank = (permission: Permission) => permission === Permission.ADMIN ? 0 : 1;
     return rank(a.permission) - rank(b.permission) ||
-      (workloads.get(a.user.id) ?? 0) - (workloads.get(b.user.id) ?? 0);
+      (workloads.get(a.userId) ?? 0) - (workloads.get(b.userId) ?? 0);
   });
-  const candidates = preferredUserId
-    ? ordered.filter((item) => item.user.id === preferredUserId)
-    : ordered;
+  const candidates = preferredUserId ? ordered.filter((item) => item.userId === preferredUserId) : ordered;
   for (const candidate of candidates) {
-    if (hasWorkScheduleConflict(candidate.user.workSchedule, start, end, timeZone)) continue;
-    if (await memberConflicts(familyId, candidate.user.id, start, end)) continue;
-    return candidate.user.id;
+    if (hasWorkScheduleConflict(candidate.workSchedule, start, end, timeZone)) continue;
+    if (await memberConflicts(familyId, candidate.userId, start, end)) continue;
+    return candidate.userId;
   }
   return null;
 }
 
+async function validateParticipant(familyId: string, participantValue: string | undefined) {
+  const [participantType, participantId] = (participantValue || "").split(":");
+  if (participantType === "kid" && participantId) {
+    const [kid] = await db`
+      SELECT "id" FROM "KidProfile" WHERE "id" = ${participantId} AND "familyGroupId" = ${familyId} LIMIT 1
+    `;
+    if (!kid) throw new Error("Il profilo del figlio selezionato non appartiene a questa famiglia.");
+  } else if (participantType === "user" && participantId) {
+    await validateFamilyUsers(familyId, [participantId]);
+  } else if (participantValue) {
+    throw new Error("Il familiare selezionato non è valido.");
+  }
+  return { participantType, participantId };
+}
+
 export async function createEvent(formData: FormData) {
-  const context = await requireAdmin();
+  const context = await requireFamilyCoordinator();
   const input = parseEvent(formData);
   const startTime = dateTimeFromLocal(input.date, input.start, context.family.timezone);
   const endTime = dateTimeFromLocal(input.date, input.end, context.family.timezone);
-  const [participantType, participantId] = (input.participantId || "").split(":");
-  const userIds = [input.assignedUserId, input.chaperoneUserId, input.pickupUserId].filter((value): value is string => Boolean(value));
-  await validateFamilyUsers(context.familyId, userIds);
-
-  if (participantType === "kid" && participantId) {
-    const kid = await prisma.kidProfile.findFirst({ where: { id: participantId, familyGroupId: context.familyId } });
-    if (!kid) throw new Error("Il profilo del figlio selezionato non appartiene a questa famiglia.");
-  } else if (participantType === "user" && participantId) {
-    await validateFamilyUsers(context.familyId, [participantId]);
-  } else if (input.participantId) {
-    throw new Error("Il familiare selezionato non è valido.");
-  }
+  const { participantType, participantId } = await validateParticipant(context.familyId, input.participantId);
+  const chaperoneUserId = input.chaperoneUserId || null;
+  const pickupUserId = input.pickupUserId || null;
+  await validateFamilyUsers(context.familyId, [input.assignedUserId ?? "", chaperoneUserId ?? "", pickupUserId ?? ""]);
 
   let assignedUserId = input.assignedUserId || (participantType === "user" ? participantId : "") || null;
   let status: EventStatus = EventStatus.UNASSIGNED;
@@ -171,40 +173,29 @@ export async function createEvent(formData: FormData) {
   }
 
   if (participantType === "kid" && participantId) {
-    const kidOverlap = await prisma.event.findFirst({
-      where: {
-        familyGroupId: context.familyId,
-        kidProfileId: participantId,
-        startTime: { lt: endTime },
-        endTime: { gt: startTime },
-      },
-      select: { id: true },
-    });
+    const [kidOverlap] = await db`
+      SELECT "id" FROM "Event"
+      WHERE "familyGroupId" = ${context.familyId} AND "kidProfileId" = ${participantId}
+        AND "startTime" < ${endTime} AND "endTime" > ${startTime}
+      LIMIT 1
+    `;
     if (kidOverlap) status = EventStatus.CONFLICT;
   }
-
-  const chaperoneUserId = input.chaperoneUserId || null;
-  const pickupUserId = input.pickupUserId || null;
   for (const userId of [chaperoneUserId, pickupUserId]) {
     if (userId && await memberConflicts(context.familyId, userId, startTime, endTime)) status = EventStatus.CONFLICT;
   }
 
-  await prisma.event.create({
-    data: {
-      familyGroupId: context.familyId,
-      title: input.title,
-      startTime,
-      endTime,
-      category: input.category,
-      status,
-      location: input.location || null,
-      description: input.description || null,
-      assignedUserId,
-      chaperoneUserId,
-      pickupUserId,
-      kidProfileId: participantType === "kid" ? participantId : null,
-    },
-  });
+  await db`
+    INSERT INTO "Event" (
+      "id", "familyGroupId", "title", "startTime", "endTime", "category", "status",
+      "location", "description", "assignedUserId", "chaperoneUserId", "pickupUserId", "kidProfileId", "updatedAt"
+    )
+    VALUES (
+      gen_random_uuid()::text, ${context.familyId}, ${input.title}, ${startTime}, ${endTime}, ${input.category}, ${status},
+      ${input.location || null}, ${input.description || null}, ${assignedUserId}, ${chaperoneUserId}, ${pickupUserId},
+      ${participantType === "kid" ? participantId : null}, NOW()
+    )
+  `;
 
   revalidatePath("/calendar");
   revalidatePath("/tasks");
@@ -212,117 +203,112 @@ export async function createEvent(formData: FormData) {
 }
 
 export async function updateEvent(formData: FormData) {
-  const context = await requireAdmin();
+  const context = await requireFamilyCoordinator();
   const id = z.string().min(1).safeParse(formData.get("id"));
   if (!id.success) throw new Error("Impegno non valido.");
-  const event = await prisma.event.findFirst({ where: { id: id.data, familyGroupId: context.familyId } });
+  const [event] = await db`
+    SELECT "id" FROM "Event" WHERE "id" = ${id.data} AND "familyGroupId" = ${context.familyId} LIMIT 1
+  `;
   if (!event) throw new Error("Impegno non trovato.");
+
   const input = parseEvent(formData);
   const startTime = dateTimeFromLocal(input.date, input.start, context.family.timezone);
   const endTime = dateTimeFromLocal(input.date, input.end, context.family.timezone);
-  const [participantType, participantId] = (input.participantId || "").split(":");
-  await validateFamilyUsers(context.familyId, [input.assignedUserId, input.chaperoneUserId, input.pickupUserId].filter((value): value is string => Boolean(value)));
-  if (participantType === "kid" && participantId && !(await prisma.kidProfile.findFirst({ where: { id: participantId, familyGroupId: context.familyId } }))) {
-    throw new Error("Il profilo del figlio selezionato non appartiene a questa famiglia.");
-  }
-  if (participantType === "user" && participantId) await validateFamilyUsers(context.familyId, [participantId]);
-  if (input.participantId && !["kid", "user"].includes(participantType)) throw new Error("Il familiare selezionato non è valido.");
-
+  const { participantType, participantId } = await validateParticipant(context.familyId, input.participantId);
   const assignedUserId = input.assignedUserId || (participantType === "user" ? participantId : "") || null;
+  const chaperoneUserId = input.chaperoneUserId || null;
+  const pickupUserId = input.pickupUserId || null;
+  await validateFamilyUsers(context.familyId, [assignedUserId ?? "", chaperoneUserId ?? "", pickupUserId ?? ""]);
+
   let status: EventStatus = assignedUserId ? EventStatus.CONFIRMED : EventStatus.UNASSIGNED;
-  for (const userId of [assignedUserId, input.chaperoneUserId, input.pickupUserId]) {
+  for (const userId of [assignedUserId, chaperoneUserId, pickupUserId]) {
     if (userId && await memberConflicts(context.familyId, userId, startTime, endTime, event.id)) status = EventStatus.CONFLICT;
   }
   if (participantType === "kid" && participantId) {
-    const conflict = await prisma.event.findFirst({
-      where: { familyGroupId: context.familyId, id: { not: event.id }, kidProfileId: participantId, startTime: { lt: endTime }, endTime: { gt: startTime } },
-      select: { id: true },
-    });
+    const [conflict] = await db`
+      SELECT "id" FROM "Event"
+      WHERE "familyGroupId" = ${context.familyId} AND "id" <> ${event.id} AND "kidProfileId" = ${participantId}
+        AND "startTime" < ${endTime} AND "endTime" > ${startTime}
+      LIMIT 1
+    `;
     if (conflict) status = EventStatus.CONFLICT;
   }
   if (assignedUserId) {
-    const membership = await prisma.familyMember.findFirst({
-      where: { familyGroupId: context.familyId, userId: assignedUserId },
-      select: { user: { select: { workSchedule: true } } },
-    });
-    if (membership && hasWorkScheduleConflict(membership.user.workSchedule, startTime, endTime, context.family.timezone)) {
+    const [membership] = await db`
+      SELECT u."workSchedule" FROM "FamilyMember" fm
+      JOIN "User" u ON u."id" = fm."userId"
+      WHERE fm."familyGroupId" = ${context.familyId} AND fm."userId" = ${assignedUserId} LIMIT 1
+    `;
+    if (membership && hasWorkScheduleConflict(membership.workSchedule, startTime, endTime, context.family.timezone)) {
       status = EventStatus.CONFLICT;
     }
   }
 
-  await prisma.event.update({
-    where: { id: event.id },
-    data: {
-      title: input.title,
-      startTime,
-      endTime,
-      category: input.category,
-      status,
-      location: input.location || null,
-      description: input.description || null,
-      assignedUserId,
-      chaperoneUserId: input.chaperoneUserId || null,
-      pickupUserId: input.pickupUserId || null,
-      kidProfileId: participantType === "kid" ? participantId : null,
-    },
-  });
+  await db`
+    UPDATE "Event" SET
+      "title" = ${input.title}, "startTime" = ${startTime}, "endTime" = ${endTime},
+      "category" = ${input.category}, "status" = ${status}, "location" = ${input.location || null},
+      "description" = ${input.description || null}, "assignedUserId" = ${assignedUserId},
+      "chaperoneUserId" = ${chaperoneUserId}, "pickupUserId" = ${pickupUserId},
+      "kidProfileId" = ${participantType === "kid" ? participantId : null}, "updatedAt" = NOW()
+    WHERE "id" = ${event.id} AND "familyGroupId" = ${context.familyId}
+  `;
   revalidatePath("/calendar");
 }
 
 export async function deleteEvent(formData: FormData) {
-  const context = await requireAdmin();
+  const context = await requireFamilyCoordinator();
   const id = z.string().min(1).safeParse(formData.get("id"));
   if (!id.success) throw new Error("Impegno non valido.");
-  await prisma.event.deleteMany({ where: { id: id.data, familyGroupId: context.familyId } });
+  await db`DELETE FROM "Event" WHERE "id" = ${id.data} AND "familyGroupId" = ${context.familyId}`;
   revalidatePath("/calendar");
 }
 
 export async function moveEvent(formData: FormData) {
-  const context = await requireAdmin();
+  const context = await requireFamilyCoordinator();
   const id = z.string().min(1).safeParse(formData.get("id"));
-  const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).safeParse(formData.get("date"));
-  const start = z.string().regex(/^\d{2}:\d{2}$/).safeParse(formData.get("start"));
+  const date = z.string().refine(isCalendarDate).safeParse(formData.get("date"));
+  const start = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).safeParse(formData.get("start"));
   if (!id.success || !date.success || !start.success) throw new Error("Spostamento non valido.");
-  const event = await prisma.event.findFirst({ where: { id: id.data, familyGroupId: context.familyId } });
+  const [event] = await db`
+    SELECT "id", "startTime", "endTime", "assignedUserId", "chaperoneUserId", "pickupUserId", "kidProfileId"
+    FROM "Event" WHERE "id" = ${id.data} AND "familyGroupId" = ${context.familyId} LIMIT 1
+  `;
   if (!event) throw new Error("Impegno non trovato.");
-  const duration = event.endTime.getTime() - event.startTime.getTime();
+
+  const duration = new Date(event.endTime).getTime() - new Date(event.startTime).getTime();
   const startTime = dateTimeFromLocal(date.data, start.data, context.family.timezone);
   const endTime = new Date(startTime.getTime() + duration);
-  const assignedConflict = event.assignedUserId
-    ? await prisma.event.findFirst({
-        where: {
-          familyGroupId: context.familyId,
-          id: { not: event.id },
-          startTime: { lt: endTime },
-          endTime: { gt: startTime },
-          OR: [
-            { assignedUserId: event.assignedUserId },
-            { chaperoneUserId: event.assignedUserId },
-            { pickupUserId: event.assignedUserId },
-          ],
-        },
-        select: { id: true },
-      })
-    : null;
-  const kidConflict = event.kidProfileId
-    ? await prisma.event.findFirst({
-        where: {
-          familyGroupId: context.familyId,
-          id: { not: event.id },
-          kidProfileId: event.kidProfileId,
-          startTime: { lt: endTime },
-          endTime: { gt: startTime },
-        },
-        select: { id: true },
-      })
-    : null;
-  await prisma.event.update({
-    where: { id: event.id },
-    data: {
-      startTime,
-      endTime,
-      status: assignedConflict || kidConflict ? EventStatus.CONFLICT : event.assignedUserId ? EventStatus.CONFIRMED : EventStatus.UNASSIGNED,
-    },
-  });
+  let conflict = false;
+  for (const userId of [event.assignedUserId, event.chaperoneUserId, event.pickupUserId]) {
+    if (userId && await memberConflicts(context.familyId, userId, startTime, endTime, event.id)) conflict = true;
+  }
+  if (event.assignedUserId) {
+    const [membership] = await db`
+      SELECT u."workSchedule" FROM "FamilyMember" fm
+      JOIN "User" u ON u."id" = fm."userId"
+      WHERE fm."familyGroupId" = ${context.familyId} AND fm."userId" = ${event.assignedUserId} LIMIT 1
+    `;
+    if (membership && hasWorkScheduleConflict(membership.workSchedule, startTime, endTime, context.family.timezone)) {
+      conflict = true;
+    }
+  }
+  let kidConflict = false;
+  if (event.kidProfileId) {
+    const [overlap] = await db`
+      SELECT "id" FROM "Event"
+      WHERE "familyGroupId" = ${context.familyId} AND "id" <> ${event.id} AND "kidProfileId" = ${event.kidProfileId}
+        AND "startTime" < ${endTime} AND "endTime" > ${startTime}
+      LIMIT 1
+    `;
+    kidConflict = Boolean(overlap);
+  }
+  const status = conflict || kidConflict
+    ? EventStatus.CONFLICT
+    : event.assignedUserId ? EventStatus.CONFIRMED : EventStatus.UNASSIGNED;
+  await db`
+    UPDATE "Event" SET "startTime" = ${startTime}, "endTime" = ${endTime}, "status" = ${status}, "updatedAt" = NOW()
+    WHERE "id" = ${event.id} AND "familyGroupId" = ${context.familyId}
+  `;
   revalidatePath("/calendar");
 }

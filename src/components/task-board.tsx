@@ -1,6 +1,6 @@
 "use client";
 
-import { TaskStatus } from "@prisma/client";
+import { TaskStatus } from "@/lib/domain";
 import { useState } from "react";
 import { createTask, toggleTask } from "@/app/actions/tasks";
 

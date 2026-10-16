@@ -1,6 +1,6 @@
 "use client";
 
-import { Category, EventStatus, Permission } from "@prisma/client";
+import { Category, EventStatus, Permission } from "@/lib/domain";
 import { useRouter } from "next/navigation";
 import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Clock3, MapPin, Plus, TriangleAlert, UsersRound, X } from "lucide-react";
 import { DragEvent, useEffect, useMemo, useState, useTransition } from "react";
