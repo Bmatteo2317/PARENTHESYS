@@ -3,15 +3,30 @@ import { neon } from "@neondatabase/serverless";
 
 loadEnvConfig(process.cwd());
 
-const databaseUrl =
-  process.env.DATABASE_URL ??
-  process.env.NEON_DATABASE_URL ??
-  process.env.NEON_POSTGRES_URL ??
-  process.env.NEON_POSTGRES_PRISMA_URL ??
-  process.env.POSTGRES_URL;
-
-if (!databaseUrl) {
-  throw new Error("DATABASE_URL non è configurata. Collega l'integrazione Neon al progetto.");
+function getDatabaseUrl() {
+  return [
+    process.env.DATABASE_URL,
+    process.env.NEON_DATABASE_URL,
+    process.env.NEON_POSTGRES_URL,
+    process.env.NEON_POSTGRES_PRISMA_URL,
+    process.env.POSTGRES_URL,
+  ].find((value) => typeof value === "string" && value.trim().length > 0)?.trim();
 }
 
-export const db = neon(databaseUrl);
+let client: ReturnType<typeof neon> | undefined;
+
+function getClient() {
+  if (client) return client;
+
+  const databaseUrl = getDatabaseUrl();
+  if (!databaseUrl) {
+    throw new Error("Nessuna URL di connessione Neon valida è configurata.");
+  }
+
+  client = neon(databaseUrl);
+  return client;
+}
+
+export const db = ((strings: TemplateStringsArray, ...values: unknown[]) => {
+  return getClient()(strings, ...values) as Promise<Record<string, any>[]>;
+}) as (strings: TemplateStringsArray, ...values: unknown[]) => Promise<Record<string, any>[]>;
