@@ -1,6 +1,6 @@
 "use server";
 
-import { Category, EventStatus, Permission } from "@/lib/domain";
+import { EventStatus, Permission } from "@/lib/domain";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { dateTimeFromLocal, isCalendarDate } from "@/lib/datetime";

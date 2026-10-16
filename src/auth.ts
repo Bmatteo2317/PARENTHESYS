@@ -43,7 +43,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (!account || account.provider === "credentials") return true;
       if (!user.email) return false;
       const profileEmail = profile && "email_verified" in profile ? profile.email_verified : undefined;
-      const verified = profileEmail === true || profileEmail === "true";
+      const verified = profileEmail === true;
       if (!verified) return false;
 
       const [linkedAccount] = await db`
