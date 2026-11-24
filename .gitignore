@@ -1,9 +1,0 @@
-node_modules/
-.next/
-.next-dev/
-.dev-server.lock
-*.tsbuildinfo
-.env
-.env.*
-!.env.example
-.neon
